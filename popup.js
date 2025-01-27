@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     // Generate page URLs and store them in the array
                     for (let i = 1; i <= pages; i++) {
-                        baseUrl = baseUrl.replace(/&page=\d+/, '');
+                        baseUrl = baseUrl.replace(/&page=\d+/, '').replace(/\?page=\d+/, '');
                         const pageUrl = `${baseUrl}&page=${i}`;
                         pageUrls.push(pageUrl);
                     }
@@ -111,6 +111,7 @@ function getAllTables() {
     const timeBetweenPages = document.getElementById('timeBetweenPages').value * 1000;
     pageLinks.forEach((pageLink, index) => {
         setTimeout(() => {
+            console.log("Loading", pageLink);
             chrome.tabs.update({url: pageLink}, function(tab) {
                 chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
                     if (info.status === 'complete' && tabId === tab.id) {
