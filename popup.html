@@ -33,14 +33,18 @@
         button:hover {
             background-color: #0056b3; /* Darker blue on hover */
         }
-        table {
+        div[role=treegrid] {
             width: 100%;
             border-collapse: collapse;
         }
-        th, td {
+        div[role=row] {
             border: 1px solid black;
-            padding: 8px;
+            padding: 4px;
             text-align: left;
+            display: flex;
+        }
+        div[role=gridcell] {
+          padding: 2px;
         }
         th {
             background-color: #f2f2f2;

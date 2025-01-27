@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var baseUrl = currentTab.url;
 
 
-        if (baseUrl.includes('https://app.apollo.io/#/people?finderViewId')) {
+        if (baseUrl.includes('https://app.apollo.io/#/people?')) {
             statusElement.textContent = "You found a list!";
             statusElement.style.fontSize = "20px";
             actionButton.disabled = false;
@@ -28,47 +28,46 @@ document.addEventListener('DOMContentLoaded', function() {
 
             chrome.scripting.executeScript({
                 target: {tabId: tabs[0].id},
-                function: function() {
+                func: function() {
                     // Find the span element by its class name
-                    function findTotalInSpanWithSpace() {
+                    function findTotalInDiv() {
                         // Initialize totalNumber to 0 by default
                         let totalText = 0;
-                        
+
                         // Get all <span> elements in the document
-                        const spanElements = document.querySelectorAll('span');
-                        
-                        // Iterate through each <span> to find the matching text
+                        const spanElements = document.querySelectorAll('div');
+
+                        // Iterate through each <div> to find the matching text
                         for (let i = 0; i < spanElements.length; i++) {
                             const textContent = spanElements[i].textContent.trim();
                             // Adjusted regex to ensure there's a space after 'of'
                             const match = textContent.match(/of\s([\d,]+)/);
-                            
+
                             // If a match is found, extract the number, remove commas, and convert to an integer
                             if (match && match[1]) {
                                 totalText = parseInt(match[1].replace(/,/g, ''), 10);
                                 break; // Stop searching once a match is found
                             }
                         }
-                        
+
                         return totalText;
                     }
-                    
-                    const totalText = findTotalInSpanWithSpace();
+
+                    const totalText = findTotalInDiv();
                     console.log(totalText); // This will display the number found after "of ", e.g., 1026
-                    
 
                     return totalText;
                 },
-            }, function(results) {
+            }).then(function(results) {
                 if (chrome.runtime.lastError) {
                     totalElement.textContent = `Error: ${chrome.runtime.lastError.message}`;
                 } else {
                     const total = results[0].result;
                     let pages = Math.ceil(total / 25);
                     pages = pages > 100 ? 100 : pages;
-                    let totalText = `<b>${total}</b> total contacts found`;
+                    let totalText = `<b>${total}</b> total contats found`;
                     let pagesText = ` on <b>${pages}</b> pages.`;
-                    
+
                     totalElement.innerHTML = totalText + pagesText;
                     totalElement.style.fontSize = "20px";
 
@@ -120,6 +119,7 @@ function getAllTables() {
                             target: {tabId: tab.id},
                             function: findAndSendTableData,
                         }, function(results) {
+                            console.log("got some results", results);
                             if (chrome.runtime.lastError) {
                                 console.error(`Error: ${chrome.runtime.lastError.message}`);
                             } else {
@@ -137,18 +137,19 @@ function getAllTables() {
 }
 
 function findAndSendTableData() {
-    const table = document.querySelector('table');
+    const table = document.querySelector('div[role=treegrid]');
     if (!table) {
         chrome.runtime.sendMessage({error: "No table found on the page."});
         return '';
     }
 
     const clonedTable = table.cloneNode(true);
+
     const elementsToRemove = clonedTable.querySelectorAll('svg, img, button, input[type="checkbox"]');
     elementsToRemove.forEach(el => el.parentNode.removeChild(el));
 
     const phoneRegex = /\+\d{11}/g;
-    const cells = clonedTable.querySelectorAll('td');
+    const cells = clonedTable.querySelectorAll('div[role=gridcell]');
     cells.forEach(cell => {
         let text = cell.textContent;
         const matches = text.match(phoneRegex);
@@ -172,31 +173,35 @@ function downloadTableAsCsv() {
         console.error("No table container found on the page to download.");
         return;
     }
-    
+
     let csvContent = "\uFEFF";
     let headerProcessed = false;
 
-    const rows = tableContainer.querySelectorAll("table tr");
+    const rows = tableContainer.querySelectorAll("div[role=row]");
     let nameIndex = -1;
     let quickActionsIndex = -1;
+    let leftActions = -1;
     for (const row of rows) {
         let rowData = [];
-        const cells = row.querySelectorAll("th, td");
+        const cells = row.querySelectorAll("div[role=columnheader], div[role=gridcell]");
         for (let i = 0; i < cells.length; i++) {
             if (row === rows[0]) {
                 if (!headerProcessed) {
-                    if (cells[i].innerText === "Name") {
+                    if (cells[i].getAttribute("data-id") === "contact.name") {
                         nameIndex = i;
-                    } else if (cells[i].innerText === "Quick Actions") {
+                    } else if (cells[i].getAttribute("data-id") === "actions") {
                         quickActionsIndex = i;
                         continue;
-                    }
+                    } else if (cells[i].getAttribute("data-id") === "leftActions") {
+                      leftActions = i;
+                      continue;
+                  }
                 } else {
                     continue;
                 }
             }
 
-            if (i === quickActionsIndex) continue;
+            if (i === quickActionsIndex || i === leftActions) continue;
             let cellText = cells[i].innerText;
             if (i === nameIndex) {
                 if (row === rows[0] && !headerProcessed) {
@@ -207,7 +212,7 @@ function downloadTableAsCsv() {
                     const lastName = names.slice(1).join(' ') || '';
                     const fullName = cellText;
                     rowData.push(`"${firstName}"`, `"${lastName}"`, `"${fullName}"`);
-                } 
+                }
                 continue;
             }
 
@@ -216,7 +221,7 @@ function downloadTableAsCsv() {
             }
 
             cellText = cellText.replace(/[^a-zA-Z0-9\s,.@-]/g, '').replace(/Â/g, '');
-            cellText = cellText.replace(/"/g, '""').replace(/#/g, ''); 
+            cellText = cellText.replace(/"/g, '""').replace(/#/g, '');
             cellText = cellText.trim();
             rowData.push(`"${cellText}"`);
         }
@@ -232,15 +237,15 @@ function downloadTableAsCsv() {
         }
     }
     const fileNameInput = document.getElementById('fileName');
-    const fileName = fileNameInput.value || 'tableData'; 
+    const fileName = fileNameInput.value || 'tableData';
     const encodedUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", fileName + ".csv");
     document.body.appendChild(link);
-    
-    link.click(); 
-    document.body.removeChild(link); 
+
+    link.click();
+    document.body.removeChild(link);
 }
 
 
