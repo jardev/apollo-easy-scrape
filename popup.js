@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     // Generate page URLs and store them in the array
                     for (let i = 1; i <= pages; i++) {
-                        baseUrl = baseUrl.replace(/&page=\d+/, '').replace(/\?page=\d+/, '');
+                        baseUrl = baseUrl.replace(/&page=\d+/, '').replace(/\?page=\d+/, '?');
                         const pageUrl = `${baseUrl}&page=${i}`;
                         pageUrls.push(pageUrl);
                     }
@@ -106,7 +106,51 @@ document.getElementById('displayTableButton').addEventListener('click', function
     getAllTables();
 });
 
+
 function getAllTables() {
+  const pageLinks = pageUrls;
+  const timeBetweenPages = document.getElementById('timeBetweenPages').value * 1000;
+  const allTableData = [];
+
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0) {
+          const activeTabId = tabs[0].id;
+
+          pageLinks.forEach((pageLink, index) => {
+              setTimeout(() => {
+                  chrome.scripting.executeScript(
+                      {
+                          target: { tabId: activeTabId },
+                          func: (url) => {
+                              history.pushState(null, "", url);
+                              window.dispatchEvent(new Event("popstate"));
+                          },
+                          args: [pageLink],
+                      },
+                      () => {
+                          chrome.scripting.executeScript(
+                              {
+                                  target: { tabId: activeTabId },
+                                  function: findAndSendTableData,
+                              },
+                              (results) => {
+                                  if (!chrome.runtime.lastError) {
+                                      allTableData.push(results[0].result);
+                                      if (index === pageLinks.length - 1) {
+                                          document.getElementById('tableContainer').innerHTML = allTableData.join('');
+                                      }
+                                  }
+                              }
+                          );
+                      }
+                  );
+              }, index * timeBetweenPages);
+          });
+      }
+  });
+}
+
+function getAllTablesOld() {
     const pageLinks = pageUrls;
     const timeBetweenPages = document.getElementById('timeBetweenPages').value * 1000;
     pageLinks.forEach((pageLink, index) => {
@@ -116,14 +160,15 @@ function getAllTables() {
                 chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
                     if (info.status === 'complete' && tabId === tab.id) {
                         chrome.tabs.onUpdated.removeListener(listener);
+                        console.log("Processing", pageLink);
                         chrome.scripting.executeScript({
                             target: {tabId: tab.id},
                             function: findAndSendTableData,
                         }, function(results) {
-                            console.log("got some results", results);
                             if (chrome.runtime.lastError) {
                                 console.error(`Error: ${chrome.runtime.lastError.message}`);
                             } else {
+                                console.log("Result:", results[0].result);
                                 allTableData.push(results[0].result);
                                 if (index === pageLinks.length - 1) {
                                     document.getElementById('tableContainer').innerHTML = allTableData.join('');
@@ -138,6 +183,7 @@ function getAllTables() {
 }
 
 function findAndSendTableData() {
+    window.location.reload();
     const table = document.querySelector('div[role=treegrid]');
     if (!table) {
         chrome.runtime.sendMessage({error: "No table found on the page."});
