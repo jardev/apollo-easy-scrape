@@ -5,9 +5,7 @@
   "manifest_version": 3,
   "permissions": [
     "activeTab",
-    "scripting",
-    "webNavigation",
-    "tabs"
+    "scripting"
   ],
   "action": {
     "default_popup": "popup.html"

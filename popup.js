@@ -1,306 +1,249 @@
-var pageUrls = [];
-
 document.addEventListener('DOMContentLoaded', function() {
-    var actionButton = document.getElementById('displayTableButton');
-    var downloadCsvButton = document.getElementById('downloadCsvButton');
+  // Get DOM elements
+  var statusElement = document.getElementById('status');
+  var totalElement = document.getElementById('total');
+  var displayTableButton = document.getElementById('displayTableButton');
+  var downloadCsvButton = document.getElementById('downloadCsvButton');
+  var tableContainer = document.getElementById('tableContainer');
+  var timeBetweenPagesInput = document.getElementById('timeBetweenPages');
+  var fileNameInput = document.getElementById('fileName');
 
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-        var currentTab = tabs[0];
-        var statusElement = document.getElementById('status');
-        var totalElement = document.getElementById('total');
-        var baseUrl = currentTab.url;
+  // Global variables to store data
+  let globalHeaders = null;
+  let globalData = [];
 
+  // Function to convert data to CSV
+  function convertToCSV(headers, data) {
+      const csvRows = [];
 
-        if (baseUrl.includes('https://app.apollo.io/#/people?')) {
-            statusElement.textContent = "You found a list!";
-            statusElement.style.fontSize = "20px";
-            actionButton.disabled = false;
-            actionButton.classList.add("activeButton");
-            actionButton.style.backgroundColor = "#007BFF";
-            actionButton.style.color = "white";
-            actionButton.style.cursor = "pointer";
-            actionButton.addEventListener('mouseenter', function() {
-                this.style.backgroundColor = "#0056b3";
-            });
-            actionButton.addEventListener('mouseleave', function() {
-                this.style.backgroundColor = "#007BFF";
-            });
+      // Add headers
+      csvRows.push(headers.join(','));
 
-            chrome.scripting.executeScript({
-                target: {tabId: tabs[0].id},
-                func: function() {
-                    // Find the span element by its class name
-                    function findTotalInDiv() {
-                        // Initialize totalNumber to 0 by default
-                        let totalText = 0;
-
-                        // Get all <span> elements in the document
-                        const spanElements = document.querySelectorAll('div');
-
-                        // Iterate through each <div> to find the matching text
-                        for (let i = 0; i < spanElements.length; i++) {
-                            const textContent = spanElements[i].textContent.trim();
-                            // Adjusted regex to ensure there's a space after 'of'
-                            const match = textContent.match(/of\s([\d,]+)/);
-
-                            // If a match is found, extract the number, remove commas, and convert to an integer
-                            if (match && match[1]) {
-                                totalText = parseInt(match[1].replace(/,/g, ''), 10);
-                                break; // Stop searching once a match is found
-                            }
-                        }
-
-                        return totalText;
-                    }
-
-                    const totalText = findTotalInDiv();
-                    console.log(totalText); // This will display the number found after "of ", e.g., 1026
-
-                    return totalText;
-                },
-            }).then(function(results) {
-                if (chrome.runtime.lastError) {
-                    totalElement.textContent = `Error: ${chrome.runtime.lastError.message}`;
-                } else {
-                    const total = results[0].result;
-                    let pages = Math.ceil(total / 25);
-                    pages = pages > 100 ? 100 : pages;
-                    let totalText = `<b>${total}</b> total contats found`;
-                    let pagesText = ` on <b>${pages}</b> pages.`;
-
-                    totalElement.innerHTML = totalText + pagesText;
-                    totalElement.style.fontSize = "20px";
-
-                    // Generate page URLs and store them in the array
-                    for (let i = 1; i <= pages; i++) {
-                        baseUrl = baseUrl.replace(/&page=\d+/, '').replace(/\?page=\d+/, '?');
-                        const pageUrl = `${baseUrl}&page=${i}`;
-                        pageUrls.push(pageUrl);
-                    }
-                }
-            });
-        } else {
-            statusElement.textContent = "Please go to an Apollo.io List URL";
-            statusElement.style.fontSize = "20px";
-            actionButton.disabled = true;
-            actionButton.classList.remove("activeButton");
-            actionButton.style.backgroundColor = "grey";
-            actionButton.style.color = "white";
-            actionButton.style.cursor = "not-allowed";
-        }
-    });
-
-    downloadCsvButton.addEventListener('click', function() {
-        downloadTableAsCsv();
-    });
-});
-
-var allTableData = [];
-
-document.getElementById('displayTableButton').addEventListener('click', function() {
-    // Clear the data
-    allTableData = [];
-    document.getElementById('tableContainer').innerHTML = '';
-
-    // Then fetch all tables
-    getAllTables();
-});
-
-
-function getAllTables() {
-  const pageLinks = pageUrls;
-  const timeBetweenPages = document.getElementById('timeBetweenPages').value * 1000;
-  const allTableData = [];
-
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs.length > 0) {
-          const activeTabId = tabs[0].id;
-
-          pageLinks.forEach((pageLink, index) => {
-              setTimeout(() => {
-                  chrome.scripting.executeScript(
-                      {
-                          target: { tabId: activeTabId },
-                          func: (url) => {
-                              history.pushState(null, "", url);
-                              window.dispatchEvent(new Event("popstate"));
-                          },
-                          args: [pageLink],
-                      },
-                      () => {
-                          chrome.scripting.executeScript(
-                              {
-                                  target: { tabId: activeTabId },
-                                  function: findAndSendTableData,
-                              },
-                              (results) => {
-                                  if (!chrome.runtime.lastError) {
-                                      allTableData.push(results[0].result);
-                                      if (index === pageLinks.length - 1) {
-                                          document.getElementById('tableContainer').innerHTML = allTableData.join('');
-                                      }
-                                  }
-                              }
-                          );
-                      }
-                  );
-              }, index * timeBetweenPages);
+      // Add data rows
+      data.forEach(row => {
+          const values = headers.map(header => {
+              const value = row[header] || '';
+              // Escape quotes and wrap in quotes if contains comma or quotes
+              return `"${value.replace(/"/g, '""')}"`;
           });
+          csvRows.push(values.join(','));
+      });
+
+      return csvRows.join('\n');
+  }
+
+  // Function to download CSV
+  function downloadCSV(headers, data) {
+      const fileName = (fileNameInput.value || 'apollo_data') + '.csv';
+      const csvContent = convertToCSV(headers, data);
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+
+      if (navigator.msSaveBlob) { // IE 10+
+          navigator.msSaveBlob(blob, fileName);
+      } else {
+          link.href = URL.createObjectURL(blob);
+          link.setAttribute('download', fileName);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+      }
+  }
+
+  // Function to scrape current page
+  async function scrapePage(tabId) {
+      return new Promise((resolve) => {
+          chrome.scripting.executeScript({
+              target: {tabId: tabId},
+              function: function() {
+                  // Find the treegrid
+                  const treegrid = document.querySelector('[role="treegrid"]');
+                  if (!treegrid) return null;
+
+                  // Get header row
+                  const headerRow = treegrid.querySelector('[role="row"]');
+                  if (!headerRow) return null;
+
+                  // Get all header cells and their text content, skip the first column
+                  const headers = Array.from(headerRow.querySelectorAll('[role="columnheader"]'))
+                      .slice(1)
+                      .map(header => {
+                          const span = header.querySelector('span');
+                          return span ? span.textContent.trim() : '';
+                      })
+                      .filter(text => text && !text.includes('Quick Actions'));
+
+                  // Get all data rows
+                  const rows = Array.from(treegrid.querySelectorAll('[role="row"]')).slice(1);
+                  const data = rows.map(row => {
+                      const cells = Array.from(row.querySelectorAll('[role="cell"]'))
+                          .slice(1);
+
+                      const rowData = cells.map((cell, index) => {
+                          let cellValue = '';
+
+                          if (headers[index] === 'Links') {
+                              const linkedInLink = cell.querySelector('a[href*="linkedin.com"]');
+                              if (linkedInLink) {
+                                  cellValue = linkedInLink.getAttribute('href') || '';
+                              }
+                          } else {
+                              cellValue = cell.querySelector('a')?.textContent?.trim() ||
+                                        cell.querySelector('span.zp_xvo3G')?.textContent?.trim() ||
+                                        cell.querySelector('.zp_PTp8r')?.textContent?.trim() ||
+                                        cell.textContent?.trim() ||
+                                        '';
+                          }
+
+                          return cellValue.replace(/^\s+|\s+$/g, '');
+                      });
+
+                      return headers.reduce((acc, header, index) => {
+                          acc[header] = rowData[index] || '';
+                          return acc;
+                      }, {});
+                  });
+
+                  // Check if next button is disabled
+                  const nextButton = document.querySelector('button[aria-label="Next"]');
+                  const isLastPage = nextButton ? nextButton.getAttribute('aria-disabled') === 'true' : true;
+
+                  return { headers, data, isLastPage };
+              },
+          }, resolve);
+      });
+  }
+
+  // Function to click next button
+  async function clickNextButton(tabId) {
+      return new Promise((resolve) => {
+          chrome.scripting.executeScript({
+              target: {tabId: tabId},
+              function: function() {
+                  const nextButton = document.querySelector('button[aria-label="Next"]');
+                  if (nextButton && nextButton.getAttribute('aria-disabled') !== 'true') {
+                      nextButton.click();
+                      return true;
+                  }
+                  return false;
+              },
+          }, resolve);
+      });
+  }
+
+  // Function to delay execution
+  function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Check if we're on an Apollo.io page
+  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+      var currentTab = tabs[0];
+      var baseUrl = currentTab.url;
+
+      if (baseUrl.includes('https://app.apollo.io/')) {
+          statusElement.textContent = "You found a list!";
+          statusElement.style.fontSize = "20px";
+
+          // Get the total contacts
+          chrome.scripting.executeScript({
+              target: {tabId: tabs[0].id},
+              function: function() {
+                  const allDivs = Array.from(document.getElementsByTagName('div'));
+                  const paginationDiv = allDivs.find(div => {
+                      const text = div.textContent.trim();
+                      return /^\d+\s*-\s*\d+\s*of\s*\d+$/.test(text);
+                  });
+
+                  if (!paginationDiv) return 0;
+                  const text = paginationDiv.textContent.trim();
+                  const numbers = text.match(/\d+/g);
+                  return numbers ? parseInt(numbers[2], 10) : 0;
+              },
+          }, function(results) {
+              if (chrome.runtime.lastError) {
+                  totalElement.textContent = 'Error getting total';
+              } else {
+                  const total = results[0].result;
+                  totalElement.innerHTML = `<b>${total}</b> total contacts found`;
+                  totalElement.style.fontSize = "20px";
+              }
+          });
+
+          // Add click handler for scrape button
+          displayTableButton.addEventListener('click', async function() {
+              globalData = [];
+              let isLastPage = false;
+              const delaySeconds = parseInt(timeBetweenPagesInput.value) || 5;
+
+              while (!isLastPage) {
+                  // Scrape current page
+                  const results = await scrapePage(currentTab.id);
+                  const pageData = results[0].result;
+
+                  if (!pageData) {
+                      tableContainer.innerHTML = 'Error getting data';
+                      break;
+                  }
+
+                  if (!globalHeaders) {
+                      globalHeaders = pageData.headers;
+                  }
+
+                  globalData = globalData.concat(pageData.data);
+                  isLastPage = pageData.isLastPage;
+
+                  // Create table HTML
+                  let tableHtml = '<table><tr>';
+                  globalHeaders.forEach(header => {
+                      tableHtml += `<th>${header}</th>`;
+                  });
+                  tableHtml += '</tr>';
+
+                  globalData.forEach(row => {
+                      tableHtml += '<tr>';
+                      globalHeaders.forEach(header => {
+                          const cellValue = row[header] || '';
+                          if (header === 'Links' && cellValue.includes('linkedin.com')) {
+                              tableHtml += `<td><a href="${cellValue}" target="_blank">${cellValue}</a></td>`;
+                          } else {
+                              tableHtml += `<td>${cellValue}</td>`;
+                          }
+                      });
+                      tableHtml += '</tr>';
+                  });
+
+                  tableHtml += '</table>';
+                  tableContainer.innerHTML = tableHtml;
+
+                  if (!isLastPage) {
+                      // Click next button and wait
+                      const clickResult = await clickNextButton(currentTab.id);
+                      if (!clickResult[0].result) {
+                          break;
+                      }
+                      await delay(delaySeconds * 1000);
+                  }
+              }
+
+              // Enable download button after scraping is complete
+              downloadCsvButton.disabled = false;
+          });
+
+          // Add click handler for download CSV button
+          downloadCsvButton.addEventListener('click', function() {
+              if (globalHeaders && globalData.length > 0) {
+                  downloadCSV(globalHeaders, globalData);
+              } else {
+                  alert('Please scrape data first before downloading CSV');
+              }
+          });
+
+      } else {
+          statusElement.textContent = "Please go to an Apollo.io List URL";
+          statusElement.style.fontSize = "20px";
+          displayTableButton.disabled = true;
+          downloadCsvButton.disabled = true;
       }
   });
-}
-
-function getAllTablesOld() {
-    const pageLinks = pageUrls;
-    const timeBetweenPages = document.getElementById('timeBetweenPages').value * 1000;
-    pageLinks.forEach((pageLink, index) => {
-        setTimeout(() => {
-            console.log("Loading", pageLink);
-            chrome.tabs.update({url: pageLink}, function(tab) {
-                chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-                    if (info.status === 'complete' && tabId === tab.id) {
-                        chrome.tabs.onUpdated.removeListener(listener);
-                        console.log("Processing", pageLink);
-                        chrome.scripting.executeScript({
-                            target: {tabId: tab.id},
-                            function: findAndSendTableData,
-                        }, function(results) {
-                            if (chrome.runtime.lastError) {
-                                console.error(`Error: ${chrome.runtime.lastError.message}`);
-                            } else {
-                                console.log("Result:", results[0].result);
-                                allTableData.push(results[0].result);
-                                if (index === pageLinks.length - 1) {
-                                    document.getElementById('tableContainer').innerHTML = allTableData.join('');
-                                }
-                            }
-                        });
-                    }
-                });
-            });
-        }, index * timeBetweenPages); // Wait 5 seconds between each page to avoid overloading the server
-    });
-}
-
-function findAndSendTableData() {
-    window.location.reload();
-    const table = document.querySelector('div[role=treegrid]');
-    if (!table) {
-        chrome.runtime.sendMessage({error: "No table found on the page."});
-        return '';
-    }
-
-    const clonedTable = table.cloneNode(true);
-
-    const elementsToRemove = clonedTable.querySelectorAll('svg, img, button, input[type="checkbox"]');
-    elementsToRemove.forEach(el => el.parentNode.removeChild(el));
-
-    const phoneRegex = /\+\d{11}/g;
-    const cells = clonedTable.querySelectorAll('div[role=gridcell]');
-    cells.forEach(cell => {
-        let text = cell.textContent;
-        const matches = text.match(phoneRegex);
-        if (matches) {
-            matches.forEach(match => {
-                const formatted = match.replace(/(\+\d{1})(\d{3})(\d{3})(\d{4})/, '$1 ($2) $3-$4');
-                text = text.replace(match, formatted);
-            });
-        }
-
-        text = text.replace(/[^a-zA-Z0-9\s,.@-]/g, '').replace(/Â/g, '');
-        cell.textContent = text;
-    });
-
-    return clonedTable.outerHTML;
-}
-
-function downloadTableAsCsv() {
-    const tableContainer = document.getElementById('tableContainer');
-    if (!tableContainer) {
-        console.error("No table container found on the page to download.");
-        return;
-    }
-
-    let csvContent = "\uFEFF";
-    let headerProcessed = false;
-
-    const rows = tableContainer.querySelectorAll("div[role=row]");
-    let nameIndex = -1;
-    let quickActionsIndex = -1;
-    let leftActions = -1;
-    for (const row of rows) {
-        let rowData = [];
-        const cells = row.querySelectorAll("div[role=columnheader], div[role=gridcell]");
-        for (let i = 0; i < cells.length; i++) {
-            if (row === rows[0]) {
-                if (!headerProcessed) {
-                    if (cells[i].getAttribute("data-id") === "contact.name") {
-                        nameIndex = i;
-                    } else if (cells[i].getAttribute("data-id") === "actions") {
-                        quickActionsIndex = i;
-                        continue;
-                    } else if (cells[i].getAttribute("data-id") === "leftActions") {
-                      leftActions = i;
-                      continue;
-                  }
-                } else {
-                    continue;
-                }
-            }
-
-            if (i === quickActionsIndex || i === leftActions) continue;
-            let cellText = cells[i].innerText;
-            if (i === nameIndex) {
-                if (row === rows[0] && !headerProcessed) {
-                    rowData.push(`"First Name"`, `"Last Name"`, `"Full Name"`);
-                } else {
-                    const names = cellText.split(' ');
-                    const firstName = names[0] || '';
-                    const lastName = names.slice(1).join(' ') || '';
-                    const fullName = cellText;
-                    rowData.push(`"${firstName}"`, `"${lastName}"`, `"${fullName}"`);
-                }
-                continue;
-            }
-
-            if (cellText === "No email" || cellText === "Request Mobile Number" || cellText === "NA") {
-                cellText = " ";
-            }
-
-            cellText = cellText.replace(/[^a-zA-Z0-9\s,.@-]/g, '').replace(/Â/g, '');
-            cellText = cellText.replace(/"/g, '""').replace(/#/g, '');
-            cellText = cellText.trim();
-            rowData.push(`"${cellText}"`);
-        }
-
-        // Skip the row if it contains the word "Name" in a single cell after the first row
-        if (row !== rows[0] && rowData.some(cell => cell.includes("Name"))) {
-            continue;
-        }
-
-        csvContent += rowData.join(",") + "\r\n";
-        if (row === rows[0]) {
-            headerProcessed = true;
-        }
-    }
-    const fileNameInput = document.getElementById('fileName');
-    const fileName = fileNameInput.value || 'tableData';
-    const encodedUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", fileName + ".csv");
-    document.body.appendChild(link);
-
-    link.click();
-    document.body.removeChild(link);
-}
-
-
-chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
-    if (message.tableData) {
-        allTableData.push(message.tableData);
-        document.getElementById('tableContainer').innerHTML = allTableData.join('');
-    } else if (message.error) {
-        document.getElementById('tableContainer').textContent = message.error;
-    }
 });
